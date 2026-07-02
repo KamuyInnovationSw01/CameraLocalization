@@ -1,0 +1,49 @@
+# カメラキャリブレーション設定
+calibration:
+  # キャリブレーションパラメータファイルのパス（相対パス）
+  parameters_file: "eMeetNova.json"
+
+# ARマーカー設定
+marker:
+  # マーカーサイズ（メートル単位）
+  size_m: 0.1  # 10cm × 10cm
+  # ArUco辞書タイプ
+  dictionary: "DICT_4X4_50"
+  # マーカーの期待ID（自動検出する場合はnull）
+  expected_id: 1
+
+# UI ウィンドウ設定
+ui:
+  # カメラ映像ウィンドウ
+  camera_window:
+    name: "Camera Feed"
+    width: 960
+    height: 720
+    x_pos: 0
+    y_pos: 0
+  
+  # 3D ワイヤフレーム表示ウィンドウ
+  wireframe_window:
+    name: "3D Wireframe - Camera Pose"
+    width: 960
+    height: 720
+    x_pos: 960
+    y_pos: 0
+
+# 処理設定
+processing:
+  # カメラからのフレーム取得フレームレート（目安、実際はカメラ依存）
+  target_fps: 30
+  # マーカー検出時の画像前処理（グレースケール）
+  use_grayscale: true
+  # 3D 描画パラメータ
+  wireframe_scale: 0.15  # 相対的なスケール
+
+# デバッグ設定
+debug:
+  # 検出されたマーカーの情報を表示
+  show_marker_info: true
+  # ポーズ推定情報を表示
+  show_pose_info: true
+  # 3D座標系を表示
+  show_coordinate_frame: true
