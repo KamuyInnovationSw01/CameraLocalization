@@ -5,8 +5,11 @@
 pygrabber（DirectShow）を使用してカメラ製品名を自動取得します。
 """
 
-from typing import Dict
+from typing import Dict, Optional
 import cv2
+
+# グローバルキャッシュ
+_camera_info_cache: Optional[list] = None
 
 
 def get_camera_names_auto() -> Dict[int, str]:
@@ -28,49 +31,118 @@ def get_camera_names_auto() -> Dict[int, str]:
         
         return camera_names
     except ImportError:
+        # pygrabber not installed - fall back to generic camera names
         return {}
     except Exception:
+        # Camera name detection failed - fall back to generic camera names
         return {}
 
 
 def get_camera_info_list_with_names() -> list:
     """
-    利用可能なカメラのリストと詳細情報を取得します（製品名自動取得版）。
+    利用可能なカメラのリストと詳細情報を取得します（キャッシング対応版）。
+    初回は全カメラを検出、2回目以降はキャッシュから返す（応答性向上）。
     
     Returns:
         list: カメラ情報リスト
     """
+    global _camera_info_cache
+    
+    # キャッシュが存在する場合はそれを返す
+    if _camera_info_cache is not None:
+        return _camera_info_cache
+    
+    import threading
+    
     camera_info_list = []
     
-    # pygrabberから製品名を取得
-    camera_names = get_camera_names_auto()
+    # [1] pygrabber から利用可能なカメラを取得
+    camera_names_dict = {}
+    try:
+        from pygrabber.dshow_graph import FilterGraph
+        
+        graph = FilterGraph()
+        devices = graph.get_input_devices()
+        
+        for device_index, device_name in enumerate(devices):
+            camera_names_dict[device_index] = device_name
     
-    # 利用可能なカメラをスキャン
-    for camera_id in range(10):
-        cap = cv2.VideoCapture(camera_id)
-        if cap.isOpened():
+    except (ImportError, Exception):
+        pass  # pygrabber が利用できない場合はスキップ
+    
+    # [2] pygrabber からカメラ一覧を取得できた場合はそれを使う
+    if camera_names_dict:
+        # pygrabber が検出したカメラのみ処理
+        for camera_id, camera_name in camera_names_dict.items():
             try:
-                width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                fps = cap.get(cv2.CAP_PROP_FPS)
+                # 高速取得: cv2.VideoCapture はタイムアウト付き
+                cap = cv2.VideoCapture(camera_id)
                 
-                # カメラ名を取得（pygrabberから取得、なければID）
-                camera_name = camera_names.get(camera_id)
-                if not camera_name:
-                    camera_name = f"Camera {camera_id}"
+                if cap.isOpened():
+                    try:
+                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        
+                        camera_info = {
+                            'id': camera_id,
+                            'width': width,
+                            'height': height,
+                            'fps': fps,
+                            'name': camera_name
+                        }
+                        camera_info_list.append(camera_info)
+                    
+                    finally:
+                        cap.release()
+            
+            except Exception:
+                pass
+    
+    # [3] フォールバック: pygrabber が利用できない場合のみスキャン（タイムアウト付き）
+    else:
+        def test_camera(camera_id, results):
+            """カメラの存在と情報を取得"""
+            try:
+                cap = cv2.VideoCapture(camera_id)
                 
-                camera_info = {
-                    'id': camera_id,
-                    'width': width,
-                    'height': height,
-                    'fps': fps,
-                    'name': camera_name
-                }
-                camera_info_list.append(camera_info)
-            except Exception as e:
-                print(f"カメラ {camera_id} の情報取得エラー: {e}")
-            finally:
-                cap.release()
+                if cap.isOpened():
+                    try:
+                        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                        fps = cap.get(cv2.CAP_PROP_FPS)
+                        
+                        camera_info = {
+                            'id': camera_id,
+                            'width': width,
+                            'height': height,
+                            'fps': fps,
+                            'name': f"Camera {camera_id}"
+                        }
+                        results.append(camera_info)
+                    
+                    finally:
+                        cap.release()
+            
+            except Exception:
+                pass
+        
+        # スレッドでパラレル実行
+        results = []
+        threads = []
+        for camera_id in range(10):
+            thread = threading.Thread(target=test_camera, args=(camera_id, results), daemon=True)
+            thread.start()
+            threads.append((camera_id, thread))
+        
+        # 各スレッドの完了を待機（タイムアウト: 0.2秒/スレッド）
+        for camera_id, thread in threads:
+            thread.join(timeout=0.2)
+        
+        camera_info_list = sorted(results, key=lambda x: x['id'])
+    
+    # キャッシュに保存
+    _camera_info_cache = camera_info_list
     
     return camera_info_list
 

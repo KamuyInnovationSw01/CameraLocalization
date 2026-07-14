@@ -61,13 +61,39 @@ class CameraLocalizationApp:
     
     def _initialize_modules(self):
         """各モジュールを初期化します。"""
+        import threading
+        import time
+        
         print("\n=== モジュール初期化開始 ===")
         
         # 1. カメラハンドラー
         print("\n[1] カメラハンドラーを初期化中...")
+        print("    カメラを検出中...(最初のカメラを使用します)")
         
-        # 利用可能なカメラ情報を取得（製品名は自動検出）
-        camera_info_list = CameraHandler.get_camera_info_list()
+        # バックグラウンドでカメラリストを取得
+        camera_info_list = [None]  # 初期値
+        detection_complete = threading.Event()
+        
+        def detect_cameras():
+            camera_info_list[0] = CameraHandler.get_camera_info_list()
+            detection_complete.set()
+        
+        detect_thread = threading.Thread(target=detect_cameras, daemon=True)
+        detect_thread.start()
+        
+        # カメラ検出待機（タイムアウト 15秒、進捗表示）
+        elapsed = 0
+        print("    ", end="", flush=True)
+        while elapsed < 15:
+            if detection_complete.wait(timeout=0.5):
+                break
+            elapsed += 0.5
+            if int(elapsed) % 2 == 0:
+                print(".", end="", flush=True)
+        
+        print()
+        
+        camera_info_list = camera_info_list[0]
         
         if not camera_info_list:
             print("エラー: 利用可能なカメラが見つかりません。")
@@ -77,42 +103,86 @@ class CameraLocalizationApp:
         if len(camera_info_list) == 1:
             camera_id = camera_info_list[0]['id']
             info = camera_info_list[0]
-            print(f"カメラ {camera_id} ({info['name']}) を使用します: {info['width']}x{info['height']}@{info['fps']:.1f}fps")
+            print(f"    [OK] カメラ {camera_id} ({info['name']}) を使用します: {info['width']}x{info['height']}@{info['fps']:.1f}fps")
         else:
-            print(f"\n利用可能なカメラ:")
+            print(f"\n    利用可能なカメラ:")
             for i, info in enumerate(camera_info_list):
-                print(f"  [{i}] カメラID {info['id']:d} - {info['name']} ({info['width']:d}x{info['height']:d} @ {info['fps']:.1f}fps)")
+                print(f"      [{i}] カメラID {info['id']:d} - {info['name']} ({info['width']:d}x{info['height']:d} @ {info['fps']:.1f}fps)")
             
-            while True:
+            camera_id = None
+            while camera_id is None:
                 try:
-                    user_input = input(f"\n使用するカメラを選択してください (0-{len(camera_info_list)-1}): ")
+                    user_input = input(f"\n    使用するカメラを選択してください (0-{len(camera_info_list)-1}): ")
                     selected_index = int(user_input)
                     if 0 <= selected_index < len(camera_info_list):
                         camera_id = camera_info_list[selected_index]['id']
-                        break
                     else:
-                        print(f"エラー: インデックス {selected_index} は無効です")
-                except ValueError:
-                    print("エラー: 数値を入力してください")
+                        print(f"    エラー: インデックス {selected_index} は無効です")
+                except (ValueError, EOFError) as e:
+                    if isinstance(e, EOFError):
+                        # デフォルト: 最初のカメラ
+                        camera_id = camera_info_list[0]['id']
+                        print(f"    (入力がないため、最初のカメラ {camera_id} を使用します)")
+                    else:
+                        print("    エラー: 数値を入力してください")
+        
+        # 解像度選択
+        print(f"\n    [カメラ {camera_id} の利用可能な解像度を検索中...]")
+        available_resolutions = CameraHandler.get_available_resolutions(camera_id)
+        
+        selected_width = None
+        selected_height = None
+        
+        if available_resolutions:
+            print(f"\n    利用可能な解像度（{len(available_resolutions)} 個）:")
+            for i, (width, height) in enumerate(available_resolutions):
+                print(f"      [{i}] {width}x{height}")
+            
+            resolution_index = None
+            while resolution_index is None:
+                try:
+                    user_input = input(f"\n    使用する解像度を選択してください (0-{len(available_resolutions)-1}): ")
+                    resolution_index = int(user_input)
+                    if not (0 <= resolution_index < len(available_resolutions)):
+                        print(f"    エラー: インデックス {resolution_index} は無効です")
+                        resolution_index = None
+                except (ValueError, EOFError) as e:
+                    if isinstance(e, EOFError):
+                        # デフォルト: 最初の解像度
+                        resolution_index = 0
+                        print(f"    (入力がないため、最初の解像度を使用します)")
+                    else:
+                        print("    エラー: 数値を入力してください")
+            
+            selected_width, selected_height = available_resolutions[resolution_index]
+            print(f"    [OK] 解像度を選択: {selected_width}x{selected_height}")
+        else:
+            print("    警告: 利用可能な解像度が取得できません。デフォルト設定を使用します。")
         
         # カメラ初期化
-        self.camera_handler = CameraHandler(camera_id=camera_id)
+        self.camera_handler = CameraHandler(
+            camera_id=camera_id,
+            width=selected_width,
+            height=selected_height
+        )
         if not self.camera_handler.initialize():
-            print(f"エラー: カメラ {camera_id} 初期化に失敗しました。")
+            print(f"    エラー: カメラ {camera_id} 初期化に失敗しました。")
             sys.exit(1)
         
         # 2. マーカー検出器
         print("\n[2] マーカー検出器を初期化中...")
         marker_dict = self.config['marker']['dictionary']
         self.marker_detector = MarkerDetector(dictionary_name=marker_dict)
+        print(f"    [OK] マーカー検出器を初期化しました（辞書: {marker_dict}）")
         
         # 3. ポーズ推定器
         print("\n[3] ポーズ推定器を初期化中...")
         calib_file = self.config['calibration']['parameters_file']
         try:
             self.pose_estimator = PoseEstimator(calib_file)
+            print(f"    [OK] ポーズ推定器を初期化しました")
         except Exception as e:
-            print(f"エラー: ポーズ推定器初期化に失敗しました: {e}")
+            print(f"    エラー: ポーズ推定器初期化に失敗しました: {e}")
             sys.exit(1)
         
         # 4. ワイヤフレーム描画器
@@ -123,6 +193,7 @@ class CameraLocalizationApp:
             camera_matrix=camera_matrix,
             wireframe_scale=wireframe_scale
         )
+        print(f"    [OK] ワイヤフレーム描画器を初期化しました")
         
         # 5. UI マネージャー
         print("\n[5] UI マネージャーを初期化中...")
@@ -130,6 +201,7 @@ class CameraLocalizationApp:
             camera_config=self.config['ui']['camera_window'],
             wireframe_config=self.config['ui']['wireframe_window']
         )
+        print(f"    [OK] UI マネージャーを初期化しました")
         
         print("\n=== モジュール初期化完了 ===\n")
     
@@ -208,14 +280,41 @@ class CameraLocalizationApp:
             50, dtype=np.uint8
         )
         
-        # ポーズが推定できた場合、3D ビューを描画（matplotlib使用）
-        if pose_info is not None:
+        # ポーズが推定できた場合、3D ビューを描画
+        # パフォーマンス最適化：draw_enable フラグで制御
+        enable_3d_render = self.config.get('debug', {}).get('enable_3d_render', True)
+        
+        if pose_info is not None and enable_3d_render:
+            render_mode = self.config.get('debug', {}).get('render_mode', 'opencv').lower()
             marker_size_m = self.config['marker']['size_m']
-            wireframe_frame = self.wireframe_renderer.draw_3d_view_matplotlib(
-                rvec=pose_info['rvec'],
-                tvec=pose_info['tvec'],
-                marker_size_m=marker_size_m
-            )
+            
+            if render_mode == 'matplotlib':
+                try:
+                    wireframe_frame = self.wireframe_renderer.draw_3d_view_matplotlib(
+                        rvec=pose_info['rvec'],
+                        tvec=pose_info['tvec'],
+                        marker_size_m=marker_size_m
+                    )
+                except Exception as e:
+                    print(f"⚠ matplotlibでの3D ビュー描画エラー: {e}。OpenCVモードにフォールバックします。")
+                    # エラーが発生した場合、自動的に高速な OpenCV 描画にフォールバック
+                    try:
+                        wireframe_frame = self.wireframe_renderer.draw_3d_view(
+                            rvec=pose_info['rvec'],
+                            tvec=pose_info['tvec'],
+                            marker_size_m=marker_size_m
+                        )
+                    except Exception as fe:
+                        print(f"⚠ フォールバック（OpenCV）描画エラー: {fe}")
+            else:  # opencv モード、またはデフォルト
+                try:
+                    wireframe_frame = self.wireframe_renderer.draw_3d_view(
+                        rvec=pose_info['rvec'],
+                        tvec=pose_info['tvec'],
+                        marker_size_m=marker_size_m
+                    )
+                except Exception as e:
+                    print(f"⚠ OpenCVでの3D ビュー描画エラー: {e}")
         
         # デバッグ情報をカメラフレームに追加
         if self.config['debug']['show_marker_info']:
@@ -253,6 +352,8 @@ class CameraLocalizationApp:
     
     def run(self):
         """メインループを実行します。"""
+        import time
+        
         self.running = True
         print("\n=== アプリケーション開始 ===")
         print("キーボード操作:")
@@ -265,25 +366,34 @@ class CameraLocalizationApp:
         try:
             while self.running:
                 # フレーム取得
+                t_start = time.time()
                 ret, frame = self.camera_handler.get_frame()
                 if not ret:
                     print("フレーム取得エラー")
                     break
+                t_frame = time.time() - t_start
                 
                 # フレーム処理
+                t_start = time.time()
                 marker_info, pose_info = self.process_frame(frame)
+                t_process = time.time() - t_start
                 
                 # 出力フレームのレンダリング
+                t_start = time.time()
                 camera_frame, wireframe_frame = self.render_output(
                     frame, marker_info, pose_info
                 )
+                t_render = time.time() - t_start
                 
                 # 表示
+                t_start = time.time()
                 self.ui_manager.display_frames(camera_frame, wireframe_frame)
+                t_display = time.time() - t_start
                 
                 # ターミナルに情報を出力（フレーム数を制限して出力）
                 if frame_count % 30 == 0:  # 30フレームごと
                     self.print_info(marker_info, pose_info)
+                    print(f"[Performance] Frame:{t_frame*1000:.1f}ms Process:{t_process*1000:.1f}ms Render:{t_render*1000:.1f}ms Display:{t_display*1000:.1f}ms")
                 
                 frame_count += 1
                 

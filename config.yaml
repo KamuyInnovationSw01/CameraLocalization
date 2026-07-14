@@ -47,3 +47,7 @@ debug:
   show_pose_info: true
   # 3D座標系を表示
   show_coordinate_frame: true
+  # 3D ビュー描画を有効化（無効にするとパフォーマンス向上、画面は暗いグレーになります）
+  enable_3d_render: true
+  # 3D ビューのレンダリングモード: "opencv" (高速・軽量) または "matplotlib" (詳細・リッチな3Dボックス表示)
+  render_mode: "opencv"

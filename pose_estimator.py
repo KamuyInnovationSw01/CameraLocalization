@@ -72,20 +72,20 @@ class PoseEstimator:
             return False, None, None
         
         # マーカーの3D座標（マーカー座標系）
-        # マーカーは z=0 平面上にあると仮定
+        # ArUcoの順序: 左上(TL) -> 右上(TR) -> 右下(BR) -> 左下(BL)
         object_points = np.array([
-            [-marker_size_m / 2, -marker_size_m / 2, 0],
-            [marker_size_m / 2, -marker_size_m / 2, 0],
-            [marker_size_m / 2, marker_size_m / 2, 0],
-            [-marker_size_m / 2, marker_size_m / 2, 0]
+            [-marker_size_m / 2,  marker_size_m / 2, 0],
+            [ marker_size_m / 2,  marker_size_m / 2, 0],
+            [ marker_size_m / 2, -marker_size_m / 2, 0],
+            [-marker_size_m / 2, -marker_size_m / 2, 0]
         ], dtype=np.float32)
         
         # 画像平面上のマーカーコーナー座標
         image_points = np.array(marker_corners).reshape(4, 2).astype(np.float32)
         
         # solvePnP でポーズを推定
-        # SOLVEPNP_IPPE_SQUARE: 平面正方形マーカー専用。複数解を返すが
-        # 1 番目の解は反転補正済み（カメラがマーカー前方）を保証。
+        # SOLVEPNP_IPPE_SQUARE は平面正方形マーカー用の姿勢推定を行う。
+        # 返された rvec と tvec は同じ OpenCV 座標系の変換として扱う。
         success, rvec, tvec = cv2.solvePnP(
             objectPoints=object_points,
             imagePoints=image_points,
@@ -98,22 +98,28 @@ class PoseEstimator:
         if not success:
             return False, None, None
         
-        # === 座標系の補正 ===
-        # (1) 平面マーカーは正面付近で反転解（カメラがマーカー裏側）を返すことがある。
-        #     正しいケース：カメラの+Z方向（=R[:,2]）とtvecが反対向き（dot < 0）
-        R, _ = cv2.Rodrigues(rvec)
-        if np.dot(tvec.flatten(), R[:, 2]) > 0:
-            tvec = -tvec
-            R = R @ np.diag([1.0, 1.0, -1.0])  # Z軸反転で姿勢を正す
-        # (2) 座標系統一: OpenCV規約の +Z=カメラ前方 を、
-        #     本アプリのワールド座標 +Z=上（カメラがいる側）に揃える。
-        #     写像 p_world → p_world_new を p' = (X, Y, -Z) とすると
-        #       p_camera = R @ p_world + t
-        #               = R @ diag(1,1,-1) @ p_world_new + t
-        #     よって R_new = R @ diag(1,1,-1)、t_new = t。
-        R = R @ np.diag([1.0, 1.0, -1.0])
-        rvec, _ = cv2.Rodrigues(R)
-        
+        # デバッグ出力: solvePnPから直接得られた値を表示
+        print(f"\n--- solvePnP raw output ---")
+        print(f"rvec:\n{rvec.flatten()}")
+        print(f"tvec:\n{tvec.flatten()}")
+
+        # 推定姿勢でマーカーの3Dコーナーを再投影し、入力コーナーとの差を表示する。
+        projected_points, _ = cv2.projectPoints(
+            objectPoints=object_points,
+            rvec=rvec,
+            tvec=tvec,
+            cameraMatrix=self.camera_matrix,
+            distCoeffs=self.dist_coeffs
+        )
+        reprojection_errors = np.linalg.norm(
+            projected_points.reshape(4, 2) - image_points,
+            axis=1
+        )
+        print(f"再投影誤差 (pix): 平均={np.mean(reprojection_errors):.3f}, 最大={np.max(reprojection_errors):.3f}")
+
+        # rvec と tvec は solvePnP の座標系のまま返す。
+        # ここで片方だけを反転したり鏡映行列を Rodrigues 変換すると、
+        # 再投影を満たさない姿勢になるため、表示用の座標変換は描画側で行う。
         return True, rvec, tvec
     
     def get_pose_info(
@@ -141,13 +147,15 @@ class PoseEstimator:
         # 並進の大きさ
         distance_m = np.linalg.norm(tvec)
         
+        camera_position = (-R.T @ tvec).flatten()
+
         pose_info = {
             "rvec": rvec.flatten().tolist(),  # (3,)
             "tvec": tvec.flatten().tolist(),  # (3,)
             "rotation_matrix": R.tolist(),     # (3, 3)
             "rotation_angle_deg": float(angle_deg),
             "translation_distance_m": float(distance_m),
-            "camera_position": tvec.flatten().tolist()  # カメラの位置 (m)
+            "camera_position": camera_position.tolist()  # カメラの位置 (m)
         }
         
         return pose_info

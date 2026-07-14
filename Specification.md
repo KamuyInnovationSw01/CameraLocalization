@@ -80,18 +80,18 @@ USB カメラ
 |------|------|
 | **推定手法** | SolvePnP（Perspective-n-Point） |
 | **入力データ** | マーカーコーナー座標（4点） |
-| **キャリブレーション** | center.json から読み込み |
+| **キャリブレーション** | `config.yaml` の `calibration.parameters_file` で指定したJSONから読み込み（既定値: `eMeetNova.json`） |
 | **出力データ** | 回転ベクトル (rvec) + 並進ベクトル (tvec) |
 | **座標系** | カメラ座標系 |
 | **精度** | キャリブレーションデータに依存 |
 
 ### 3.3 3D 表示機能
 
-#### フラスタム（緑）
+#### フラスタム（シアン）
 - カメラの視野領域を四角錐で表現
 - 原点からスケーリングされた相対座標で表示
 
-#### ボディ（青）
+#### ボディ（オレンジ）
 - カメラの物理的な形状を直方体で表現
 - 寸法：幅 × 高さ × 奥行き
 
@@ -105,7 +105,7 @@ USB カメラ
 - リアルタイム カメラ映像
 - 検出されたマーカーを枠線で表示
 - マーカーID をテキスト表示
-- 3D ワイヤフレーム（投影）をオーバーレイ
+- 3Dワイヤフレームは重ねず、検出マーカーとデバッグ情報のみをオーバーレイ
 - デバッグ情報（マーカー数、距離、角度）
 
 **ウィンドウ 2: 3D ワイヤフレーム独立ビュー**
@@ -152,10 +152,10 @@ USB カメラ
 ### 5.2 コマンドライン引数
 
 ```bash
-python main.py [config_file]
+python main.py
 ```
 
-- `config_file`: 設定ファイルのパス（デフォルト: config.yaml）
+設定ファイルは現在 `config.yaml` を固定で読み込みます。別の設定ファイルを使う場合は、`main.py` の `main()` または `CameraLocalizationApp` の呼び出し側を変更してください。
 
 ### 5.3 コンソール出力
 
@@ -214,7 +214,7 @@ python main.py [config_file]
 $$
 P_{obj} = \begin{pmatrix}
 -s/2 & s/2 & s/2 & -s/2 \\
--s/2 & -s/2 & s/2 & s/2 \\
+s/2 & s/2 & -s/2 & -s/2 \\
 0 & 0 & 0 & 0
 \end{pmatrix}
 $$
@@ -229,7 +229,7 @@ success, rvec, tvec = cv2.solvePnP(
     imagePoints=P_img,       # 2D 画像座標
     cameraMatrix=K,          # カメラ行列
     distCoeffs=dist_coeffs,  # 歪み係数
-    flags=cv2.SOLVEPNP_ITERATIVE
+    flags=cv2.SOLVEPNP_IPPE_SQUARE
 )
 ```
 
@@ -246,7 +246,7 @@ $$
 
 **マーカー座標系**:
 - 原点: マーカーの中心
-- Z軸: 上向き（マーカー平面の法線）
+- Z軸: マーカー平面の法線（3Dビューでは正面方向として画面上向きに表示）
 - X軸: マーカーの右方向
 - Y軸: マーカーの下方向
 
@@ -270,13 +270,13 @@ $$
 ```yaml
 # キャリブレーション設定
 calibration:
-  parameters_file: "center.json"
+  parameters_file: "eMeetNova.json"
 
 # マーカー設定
 marker:
   size_m: 0.1                    # 10cm × 10cm
   dictionary: "DICT_4X4_50"      # ArUco 辞書
-  expected_id: null              # 期待ID（null = 自動検出）
+  expected_id: 1                 # マーカー生成時に使うID（検出処理は全IDを対象）
 
 # UI 設定
 ui:
@@ -304,13 +304,15 @@ debug:
   show_marker_info: true
   show_pose_info: true
   show_coordinate_frame: true
+  enable_3d_render: true
+  render_mode: "opencv"
 ```
 
 ---
 
 ## 8. ファイルフォーマット仕様
 
-### 8.1 center.json（キャリブレーションファイル）
+### 8.1 キャリブレーションJSON（既定値: eMeetNova.json）
 
 ```json
 {
