@@ -32,10 +32,6 @@ ui:
 
 # 処理設定
 processing:
-  # カメラからのフレーム取得フレームレート（目安、実際はカメラ依存）
-  target_fps: 30
-  # マーカー検出時の画像前処理（グレースケール）
-  use_grayscale: true
   # 3D 描画パラメータ
   wireframe_scale: 0.15  # 相対的なスケール
 
@@ -45,8 +41,6 @@ debug:
   show_marker_info: true
   # ポーズ推定情報を表示
   show_pose_info: true
-  # 3D座標系を表示
-  show_coordinate_frame: true
   # 3D ビュー描画を有効化（無効にするとパフォーマンス向上、画面は暗いグレーになります）
   enable_3d_render: true
   # 3D ビューのレンダリングモード: "opencv" (高速・軽量) または "matplotlib" (詳細・リッチな3Dボックス表示)

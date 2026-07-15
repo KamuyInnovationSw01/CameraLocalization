@@ -65,7 +65,7 @@ class CameraHandler:
                 if not ret:
                     # フレーム取得失敗時は別バックエンドを試す
                     self.cap.release()
-                    print(f"⚠ DirectShow バックエンドでフレーム取得失敗。別バックエンドを試します...")
+                    print("⚠ DirectShow バックエンドでフレーム取得失敗。別バックエンドを試します...")
                     self.cap = cv2.VideoCapture(self.camera_id)
                     
                     if not self.cap.isOpened():
@@ -123,24 +123,6 @@ class CameraHandler:
             Tuple[int, int]: (幅, 高さ)
         """
         return self.width, self.height
-    
-    @staticmethod
-    def list_available_cameras() -> List[int]:
-        """
-        利用可能なカメラのリストを取得します。
-        
-        Returns:
-            List[int]: 利用可能なカメラのID リスト
-        """
-        available_cameras = []
-        
-        for i in range(10):  # 最大10台を検査
-            cap = cv2.VideoCapture(i)
-            if cap.isOpened():
-                available_cameras.append(i)
-                cap.release()
-        
-        return available_cameras
     
     @staticmethod
     def get_available_resolutions(camera_id: int, timeout_sec: float = 10.0) -> List[Tuple[int, int]]:
@@ -206,14 +188,12 @@ class CameraHandler:
                 # pygrabber が利用できない場合はフォールバック
                 get_formats_fallback()
             
-            except Exception as e:
+            except Exception:
                 # DirectShow取得失敗時はフォールバック
                 get_formats_fallback()
         
         def get_formats_fallback():
             """フォールバック: 標準解像度をテスト"""
-            nonlocal available_resolutions
-            
             # 包括的な標準解像度リスト
             standard_resolutions = [
                 (4096, 2160), (3840, 2160),
@@ -253,17 +233,6 @@ class CameraHandler:
         thread = threading.Thread(target=get_formats_via_pygrabber, daemon=True)
         thread.start()
         thread.join(timeout=timeout_sec)
-        
+
         return available_resolutions
-    
-    @staticmethod
-    def get_camera_info_list() -> list:
-        """
-        利用可能なカメラのリストと詳細情報を取得します（製品名自動取得版）。
-        
-        Returns:
-            list: カメラ情報リスト [{'id': 0, 'width': 640, 'height': 480, 'fps': 30.0, 'name': '...'}, ...]
-        """
-        from camera_name_util import get_camera_info_list_with_names
-        
-        return get_camera_info_list_with_names()
+

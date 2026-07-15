@@ -37,30 +37,30 @@ pip install pygrabber
 
 ## テスト
 
-デモスクリプトで動作確認できます：
+アプリケーション起動時に自動検出されます：
 
 ```bash
-python demo_camera_selection.py
+python main.py
 ```
 
 ## 実装詳細
 
 ### カメラ名検出のフロー
 
-1. `camera_name_util.get_camera_names_auto()` を呼び出し
+1. `camera_discovery.get_camera_info_list()` を呼び出し
 2. pygrabber が利用可能な場合:
    - `FilterGraph().get_input_devices()` でカメラ製品名を取得
    - 例: `{0: 'ASUS FHD Webcam', 1: 'eMeet Nova', ...}`
 3. pygrabber が利用不可の場合:
-   - 空の辞書を返す（フォールバック）
+  - OpenCVでカメラIDを並列スキャンする
 4. OpenCVでカメラ解像度・FPSを取得
 5. カメラ情報を結合して表示
 
 ### コンポーネント
 
-- **camera_name_util.py**: pygrabberを使用した自動検出ロジック
-- **camera_handler.py**: `get_camera_info_list()` で自動検出を使用
-- **main.py**: config.yamlのマッピングを削除し、自動検出のみ使用
+- **camera_discovery.py**: pygrabberとOpenCVを使用した自動検出ロジック
+- **camera_handler.py**: 選択済みカメラの初期化、フレーム取得、解像度探索
+- **main.py**: カメラ選択とアプリケーション起動
 
 ## トラブルシューティング
 

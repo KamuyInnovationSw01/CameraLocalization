@@ -5,13 +5,14 @@ UI マネージャーモジュール
 
 import cv2
 import numpy as np
-from typing import Tuple, Dict
+
+from config import WindowConfig
 
 
 class UIManager:
     """2ウィンドウ表示の管理を行うクラス"""
     
-    def __init__(self, camera_config: Dict, wireframe_config: Dict):
+    def __init__(self, camera_config: WindowConfig, wireframe_config: WindowConfig):
         """
         UI マネージャーを初期化します。
         
@@ -19,18 +20,14 @@ class UIManager:
             camera_config: カメラウィンドウの設定辞書
             wireframe_config: 3D ワイヤフレームウィンドウの設定辞書
         """
-        self.camera_window_name = camera_config.get("name", "Camera Feed")
-        self.wireframe_window_name = wireframe_config.get("name", "3D Wireframe")
+        self.camera_window_name = camera_config.name
+        self.wireframe_window_name = wireframe_config.name
         
-        self.camera_window_pos = (camera_config.get("x_pos", 0), 
-                                  camera_config.get("y_pos", 0))
-        self.wireframe_window_pos = (wireframe_config.get("x_pos", 960), 
-                                     wireframe_config.get("y_pos", 0))
+        self.camera_window_pos = (camera_config.x_pos, camera_config.y_pos)
+        self.wireframe_window_pos = (wireframe_config.x_pos, wireframe_config.y_pos)
         
-        self.camera_window_size = (camera_config.get("width", 960),
-                                   camera_config.get("height", 720))
-        self.wireframe_window_size = (wireframe_config.get("width", 960),
-                                      wireframe_config.get("height", 720))
+        self.camera_window_size = (camera_config.width, camera_config.height)
+        self.wireframe_window_size = (wireframe_config.width, wireframe_config.height)
         
         self._create_windows()
     
@@ -48,7 +45,7 @@ class UIManager:
                       self.wireframe_window_pos[0], 
                       self.wireframe_window_pos[1])
         
-        print(f"ウィンドウ作成完了:")
+        print("ウィンドウ作成完了:")
         print(f"  - {self.camera_window_name}: ({self.camera_window_pos})")
         print(f"  - {self.wireframe_window_name}: ({self.wireframe_window_pos})")
     
@@ -179,10 +176,15 @@ class UIManager:
         """
         # ウィンドウが存在するかを確認（存在しない = 閉じられた）
         try:
-            # ウィンドウの状態を確認（簡易的な方法）
-            cv2.getWindowProperty(self.camera_window_name, cv2.WND_PROP_VISIBLE)
-            cv2.getWindowProperty(self.wireframe_window_name, cv2.WND_PROP_VISIBLE)
-            return False
+            camera_visible = cv2.getWindowProperty(
+                self.camera_window_name,
+                cv2.WND_PROP_VISIBLE,
+            )
+            wireframe_visible = cv2.getWindowProperty(
+                self.wireframe_window_name,
+                cv2.WND_PROP_VISIBLE,
+            )
+            return camera_visible < 1 or wireframe_visible < 1
         except:
             return True
     

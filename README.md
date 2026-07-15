@@ -10,6 +10,20 @@ USBカメラでARマーカー（ArUco）を撮影し、カメラの3次元姿勢
 - **2ウィンドウ表示**（左：カメラ映像、右：独立3Dビュー）
 - **再投影誤差による姿勢推定結果の確認**
 
+## ファイル構成
+
+- `main.py`: アプリケーションの初期化、カメラ選択、メインループ
+- `config.py`: YAML設定の読み込みと`dataclass`による型付け
+- `aruco_dictionary.py`: ArUco辞書の共有定義
+- `camera_discovery.py`: カメラ一覧、製品名、基本情報の検出
+- `camera_handler.py`: 選択済みカメラの初期化、フレーム取得、解像度探索
+- `marker_detector.py`: ArUcoマーカー検出と情報化
+- `pose_estimator.py`: マーカーからの姿勢推定
+- `pipeline.py`: 1フレームの検出、姿勢推定、描画、デバッグ出力
+- `wireframe_renderer.py`: OpenCV／matplotlibによる3D描画
+- `ui_manager.py`: OpenCVウィンドウ管理
+- `generate_markers.py`: マーカー生成用の独立CLI
+
 ---
 
 ## システム要件
@@ -37,6 +51,8 @@ pip install -r requirements.txt
 | `numpy` | 数値計算・行列演算 |
 | `PyYAML` | 設定ファイル読み込み |
 | `matplotlib` | 任意の詳細表示モード用の3D可視化 |
+
+Windowsでは、Python公式版3.11で仮想環境を作成することを推奨します。Microsoft Store版Pythonを使った仮想環境でデバッガーの起動が停止する場合は、[DEBUG_GUIDE.md](DEBUG_GUIDE.md)の環境再構築手順を使用してください。
 
 ### 2. カメラキャリブレーションパラメータの準備
 
@@ -162,6 +178,29 @@ debug:
 | **q** または **ESC** | アプリケーションを終了 |
 | **s** | 現在のフレームをキャプチャして保存 |
 
+### VS Codeでの実行
+
+`.vscode/launch.json`には、標準入力とOpenCVウィンドウに対応した統合ターミナル用の構成だけを定義しています。`Python: Select Interpreter`で次の仮想環境を選択してからF5を実行してください。
+
+```text
+.venv\Scripts\python.exe
+```
+
+### 動作確認
+
+カメラを使わずに設定とマーカー検出の基本処理を確認できます。
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+実行時の確認結果：
+
+- Python 3.11.9（Python公式版）
+- `opencv-contrib-python` 4.8.1.78
+- ArUco利用可能
+- 単体テスト3件成功
+
 ---
 
 ## 3Dビューの仕様
@@ -210,9 +249,12 @@ camera_position = -R.T @ tvec
 CameraLocalization/
 ├── main.py                    # メインアプリケーション（イベントループ）
 ├── camera_handler.py          # USB カメラ制御モジュール
-├── camera_name_util.py        # カメラ名取得ユーティリティ
+├── config.py                  # 型付き設定の読み込み
+├── aruco_dictionary.py        # ArUco辞書の共有定義
+├── camera_discovery.py        # カメラ一覧・製品名の検出
 ├── marker_detector.py         # ArUco マーカー検出モジュール
 ├── pose_estimator.py          # ポーズ推定（OpenCV座標系・再投影誤差確認）
+├── pipeline.py                # 1フレームの検出・推定・描画処理
 ├── wireframe_renderer.py      # OpenCVによる高速3Dビュー描画
 ├── ui_manager.py              # 2ウィンドウ UI 管理
 ├── generate_markers.py        # ArUco マーカー生成スクリプト
@@ -220,6 +262,7 @@ CameraLocalization/
 ├── eMeetNova.json             # eMeet Nova 用キャリブレーション
 ├── center.json                # 追加のキャリブレーション例（現在の既定値では未使用）
 ├── requirements.txt           # 依存ライブラリ
+├── tests/                      # カメラ不要の単体テスト
 ├── README.md                  # このファイル
 ├── Specification.md           # 仕様書
 ├── CAMERA_AUTO_DETECTION.md   # カメラ自動検出の説明
@@ -290,6 +333,27 @@ CameraLocalization/
 ### matplotlib 関連エラー
 - `AttributeError: 'RendererAgg' object has no attribute 'tostring_rgb'`
   → matplotlib バージョンアップに伴う API 変更。新 API `buffer_rgba()` を使用（本アプリは対応済み）
+
+### 起動時にmatplotlibのimportで止まる場合
+
+OpenCV描画を標準にしている場合、matplotlibは起動時には読み込まれません。`wireframe_renderer.py`はmatplotlibを`draw_3d_view_matplotlib()`内で遅延読み込みします。
+
+それでも起動時にmatplotlibで停止する場合は、`config.yaml`を確認してください。
+
+```yaml
+debug:
+  render_mode: "opencv"
+```
+
+Python公式版で仮想環境を作成し直す場合は、PowerShellで次を実行します。
+
+```powershell
+Remove-Item -Recurse -Force .venv
+& "C:\Users\<ユーザー名>\AppData\Local\Programs\Python\Python311\python.exe" -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+VS Codeでは`.venv\Scripts\python.exe`をPythonインタープリターに選択し、`.vscode/launch.json`の統合ターミナル構成で実行してください。
 
 ---
 

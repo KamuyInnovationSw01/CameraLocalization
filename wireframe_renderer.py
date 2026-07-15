@@ -5,17 +5,7 @@
 
 import numpy as np
 import cv2
-from typing import Optional, Tuple
-
-# matplotlib を非対話モードに設定
-import matplotlib
-matplotlib.use('Agg')  # GUI ウィンドウを表示しない backend
-import matplotlib.pyplot as plt
-plt.ioff()  # 対話モードを無効化
-
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from mpl_toolkits.mplot3d import Axes3D
-
+from typing import Tuple
 
 class WireframeRenderer:
     """3D ワイヤフレーム描画を行うクラス"""
@@ -444,6 +434,13 @@ class WireframeRenderer:
         Returns:
             np.ndarray: RGB画像 (720, 960, 3)
         """
+        # OpenCV標準モードの起動を妨げないよう、matplotlibは必要時だけ読み込む。
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+        plt.ioff()
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+
         # matplotlibの図を作成（背景色あり）
         fig = plt.figure(figsize=(960/100, 720/100), dpi=100, facecolor=(0.2, 0.2, 0.2))
         ax = fig.add_subplot(111, projection='3d')

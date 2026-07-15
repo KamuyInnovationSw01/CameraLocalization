@@ -7,17 +7,11 @@ import cv2
 import numpy as np
 from typing import Optional, Tuple, Dict, List
 
+from aruco_dictionary import get_aruco_dictionary
+
 
 class MarkerDetector:
     """ArUco マーカーの検出を行うクラス"""
-    
-    # ArUco 辞書の定義
-    DICTIONARY_MAP = {
-        "DICT_4X4_50": cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50),
-        "DICT_5X5_100": cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_100),
-        "DICT_6X6_250": cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250),
-        "DICT_ARUCO_ORIGINAL": cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL),
-    }
     
     def __init__(self, dictionary_name: str = "DICT_4X4_50"):
         """
@@ -27,10 +21,7 @@ class MarkerDetector:
             dictionary_name: 使用する ArUco 辞書の名前
         """
         self.dictionary_name = dictionary_name
-        self.dictionary = self.DICTIONARY_MAP.get(
-            dictionary_name,
-            self.DICTIONARY_MAP["DICT_4X4_50"]
-        )
+        self.dictionary = get_aruco_dictionary(dictionary_name)
         # ArUco 検出器を作成
         self.detector = cv2.aruco.ArucoDetector(self.dictionary)
         

@@ -99,7 +99,7 @@ class PoseEstimator:
             return False, None, None
         
         # デバッグ出力: solvePnPから直接得られた値を表示
-        print(f"\n--- solvePnP raw output ---")
+        print("\n--- solvePnP raw output ---")
         print(f"rvec:\n{rvec.flatten()}")
         print(f"tvec:\n{tvec.flatten()}")
 

@@ -41,3 +41,30 @@
 ## 📌 4. 再投影誤差の記録
 
 姿勢推定直後に4隅を再投影し、コンソールへ平均・最大誤差を `pix` 単位で出力する。生の姿勢が画像を説明できているかを、補正後の見た目だけに頼らず確認できる。
+
+## 📌 5. 起動時のmatplotlib初期化停止
+
+### 症状
+
+OpenCV描画を標準設定にしているにもかかわらず、`debugpy`経由の起動でmatplotlibのimport中に停止した。
+
+### 原因
+
+`wireframe_renderer.py`のトップレベルで`matplotlib.pyplot`をimportしていたため、`render_mode: "opencv"`でもmatplotlibの初期化が実行されていた。停止時の`KeyboardInterrupt`は`main.py`の処理ではなく、デバッガーが対象ファイルを実行する前のimport処理で発生していた。
+
+### 対応
+
+- matplotlib関連のimportを`draw_3d_view_matplotlib()`内へ移動
+- OpenCV標準モードではmatplotlibを起動時に読み込まない
+- VS Codeは`internalConsole`ではなく`integratedTerminal`を使用
+- Python公式版3.11から仮想環境を再作成
+
+### 確認方法
+
+```powershell
+.\.venv\Scripts\python.exe -c "import main; print('main import: OK')"
+```
+
+## 📌 6. WindowsのPython実行環境
+
+Windows Store版Pythonをベースにした仮想環境では、VS Codeのdebugpy初期化が不安定になる場合がある。`pyvenv.cfg`の`home`がWindows Store版を指している場合は、Python公式版3.11で`.venv`を作り直し、`requirements.txt`を再インストールする。

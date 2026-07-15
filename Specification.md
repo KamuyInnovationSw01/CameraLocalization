@@ -34,30 +34,50 @@
 ### 2.2 ソフトウェア構成
 
 ```
-CameraLocalization (メインアプリケーション)
-├── camera_handler.py          # USB カメラ制御
-├── marker_detector.py         # ArUco マーカー検出
-├── pose_estimator.py          # 3D ポーズ推定
-├── wireframe_renderer.py      # 3D ワイヤフレーム描画
-├── ui_manager.py              # UI 管理
-└── main.py                    # メイン統合処理
+CameraLocalization
+├── main.py                    # 起動、カメラ選択、メインループ
+├── config.py                  # YAML設定の読み込みと型検証
+├── aruco_dictionary.py        # ArUco辞書の共有定義
+├── camera_discovery.py        # カメラ一覧・製品名・基本情報の検出
+├── camera_handler.py          # カメラ初期化・フレーム取得・解像度探索
+├── marker_detector.py         # ArUcoマーカー検出と情報化
+├── pose_estimator.py          # 3Dポーズ推定
+├── pipeline.py                # 1フレームの検出・推定・描画
+├── wireframe_renderer.py      # OpenCV／matplotlibによる3D描画
+├── ui_manager.py              # 2ウィンドウUI管理
+├── generate_markers.py        # ArUcoマーカー生成CLI
+└── tests/                     # カメラ不要の単体テスト
 ```
 
 ### 2.3 データフロー
 
 ```
-USB カメラ
+設定ファイル (config.yaml)
     ↓
-[フレーム取得] (camera_handler)
+[設定読み込み・検証] (config)
     ↓
-[マーカー検出] (marker_detector)
+[カメラ一覧・製品名の検出] (camera_discovery)
     ↓
-[ポーズ推定] (pose_estimator)
+[カメラ・解像度の選択] (main)
     ↓
-[3D 描画] (wireframe_renderer)
+[カメラ初期化] (camera_handler)
     ↓
-[2ウィンドウ表示] (ui_manager)
+┌─────────────────────────────────────────────┐
+│ メインループ (main)                          │
+│                                             │
+│ [フレーム取得] (camera_handler)              │
+│       ↓                                     │
+│ [マーカー検出] (marker_detector)             │
+│       ↓                                     │
+│ [ポーズ推定] (pose_estimator)                │
+│       ↓                                     │
+│ [フレーム描画・デバッグ情報] (pipeline)      │
+│       ↓                                     │
+│ [2ウィンドウ表示] (ui_manager)               │
+└─────────────────────────────────────────────┘
 ```
+
+マーカーが検出されなかったフレームでは、ポーズ推定と3D描画をスキップします。複数のマーカーが検出された場合は、最初のマーカーを使ってポーズを推定します。3D描画は`config.yaml`の`debug.render_mode`で選択し、標準はOpenCVです。matplotlibはmatplotlibモードを選択した場合だけ読み込まれます。
 
 ---
 
@@ -295,15 +315,12 @@ ui:
 
 # 処理設定
 processing:
-  target_fps: 30
-  use_grayscale: true
   wireframe_scale: 0.15
 
 # デバッグ設定
 debug:
   show_marker_info: true
   show_pose_info: true
-  show_coordinate_frame: true
   enable_3d_render: true
   render_mode: "opencv"
 ```

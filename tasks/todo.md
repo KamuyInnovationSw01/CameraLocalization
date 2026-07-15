@@ -36,3 +36,16 @@
 - [x] 全表示対象を対象にした自動フィットで画面外表示を防止
 - [x] `test_*.py` を削除
 
+## 構成整理・実行環境対応（2026-07-15）
+
+- [x] `config.py`を追加し、YAML設定を`dataclass`で型付け
+- [x] `camera_name_util.py`を削除し、`camera_discovery.py`へ統合
+- [x] `aruco_dictionary.py`を追加し、ArUco辞書定義を共通化
+- [x] `pipeline.py`を追加し、フレーム処理を`main.py`から分離
+- [x] 未使用設定（`target_fps`、`use_grayscale`、`show_coordinate_frame`）を削除
+- [x] `opencv-contrib-python`へ依存を統一
+- [x] Python公式版3.11で`.venv`を再構築
+- [x] VS Codeデバッグ設定を統合ターミナル1構成へ整理
+- [x] matplotlibを遅延import化し、OpenCV標準起動時の初期化停止を回避
+- [x] 設定・マーカー検出の単体テスト3件を追加・実行
+

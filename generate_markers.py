@@ -7,23 +7,15 @@ ArUco マーカーを生成し、PNG/PDF 形式で出力します。
 
 import cv2
 import numpy as np
-import yaml
 import argparse
 import os
-from pathlib import Path
-from typing import Dict, Optional, List
+
+from aruco_dictionary import get_aruco_dictionary
+from config import load_config
 
 
 class ArUcoMarkerGenerator:
     """ArUco マーカーを生成・出力するクラス"""
-    
-    # ArUco 辞書の定義
-    DICTIONARY_MAP = {
-        "DICT_4X4_50": cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_50),
-        "DICT_5X5_100": cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_5X5_100),
-        "DICT_6X6_250": cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_6X6_250),
-        "DICT_ARUCO_ORIGINAL": cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_ARUCO_ORIGINAL),
-    }
     
     def __init__(self, config_file: str = "config.yaml"):
         """
@@ -32,38 +24,16 @@ class ArUcoMarkerGenerator:
         Args:
             config_file: 設定ファイルのパス
         """
-        self.config = self._load_config(config_file)
-        self.dictionary_name = self.config['marker']['dictionary']
-        self.dictionary = self.DICTIONARY_MAP.get(
-            self.dictionary_name,
-            self.DICTIONARY_MAP["DICT_4X4_50"]
-        )
-        self.marker_size_m = self.config['marker']['size_m']
-        self.marker_id = self.config['marker']['expected_id']
+        self.config = load_config(config_file)
+        self.dictionary_name = self.config.marker.dictionary
+        self.dictionary = get_aruco_dictionary(self.dictionary_name)
+        self.marker_size_m = self.config.marker.size_m
+        self.marker_id = self.config.marker.expected_id
         
-        print(f"ArUco マーカー生成器を初期化しました")
+        print("ArUco マーカー生成器を初期化しました")
         print(f"  辞書: {self.dictionary_name}")
         print(f"  マーカーサイズ: {self.marker_size_m} m")
         print(f"  マーカーID: {self.marker_id if self.marker_id is not None else 'なし（全て生成）'}")
-    
-    def _load_config(self, config_file: str) -> dict:
-        """
-        設定ファイルを読み込みます。
-        
-        Args:
-            config_file: 設定ファイルのパス
-        
-        Returns:
-            dict: 設定情報
-        """
-        if not os.path.exists(config_file):
-            print(f"エラー: 設定ファイル {config_file} が見つかりません。")
-            raise FileNotFoundError(config_file)
-        
-        with open(config_file, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-        
-        return config
     
     def generate_marker(self, marker_id: int, pixels_per_inch: int = 300) -> np.ndarray:
         """
@@ -201,14 +171,9 @@ class ArUcoMarkerGenerator:
         try:
             from reportlab.pdfgen import canvas
             from reportlab.lib.units import inch
-            from PIL import Image
-            import io
             
             # マーカーを画像として生成
             marker = self.generate_marker(marker_id, dpi)
-            
-            # PIL Image に変換
-            pil_image = Image.fromarray(marker)
             
             # マーカーサイズをインチで計算
             marker_size_inches = self.marker_size_m * 100 / 2.54
