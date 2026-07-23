@@ -2,7 +2,9 @@ opencv-contrib-python==4.8.1.78
 numpy==1.26.4
 PyYAML==6.0.1
 scipy==1.11.4
-matplotlib==3.11.0
 Pillow==12.3.0
 pygrabber==0.2
 comtypes>=1.1.7
+# マーカーレス方式で使用するALIKEDとLightGlue
+torch>=2.0
+lightglue @ git+https://github.com/cvg/LightGlue.git

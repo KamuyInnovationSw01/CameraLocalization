@@ -11,7 +11,12 @@ from typing import Optional, Tuple, List
 class CameraHandler:
     """USB カメラからのフレーム取得を管理するクラス"""
     
-    def __init__(self, camera_id: int = 0, width: int = None, height: int = None):
+    def __init__(
+        self,
+        camera_id: int = 0,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ):
         """
         カメラハンドラーを初期化します。
         
@@ -23,10 +28,10 @@ class CameraHandler:
         self.camera_id = camera_id
         self.requested_width = width
         self.requested_height = height
-        self.cap = None
-        self.width = None
-        self.height = None
-        self.fps = None
+        self.cap: Optional[cv2.VideoCapture] = None
+        self.width: Optional[int] = None
+        self.height: Optional[int] = None
+        self.fps: Optional[float] = None
         
     def initialize(self) -> bool:
         """
@@ -43,7 +48,6 @@ class CameraHandler:
                 print(f"エラー: カメラ {self.camera_id} を開くことができません。")
                 return False
             
-            # 解像度を設定（要求されている場合）
             if self.requested_width is not None and self.requested_height is not None:
                 # 設定前に現在の値をリセット
                 self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
@@ -122,6 +126,8 @@ class CameraHandler:
         Returns:
             Tuple[int, int]: (幅, 高さ)
         """
+        if self.width is None or self.height is None:
+            raise RuntimeError("カメラが初期化されていません")
         return self.width, self.height
     
     @staticmethod

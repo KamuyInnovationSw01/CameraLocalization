@@ -9,6 +9,7 @@ from camera_discovery import CameraInfo, get_camera_info_list
 from camera_handler import CameraHandler
 from config import AppConfig, load_config
 from marker_detector import MarkerDetector
+from markerless_localizer import MarkerlessLocalizer
 from pipeline import FramePipeline
 from pose_estimator import PoseEstimator
 from ui_manager import UIManager
@@ -28,6 +29,12 @@ class CameraLocalizationApp:
         self._initialize_modules()
 
     def _initialize_modules(self) -> None:
+        """カメラ、検出器、推定器、描画器、UIを設定に従って初期化します。
+
+        マーカー方式とマーカーレス方式は検出器だけが異なるため、選択された
+        方式のモジュールだけを生成します。これにより不要なモデル読み込みを
+        避け、従来のArUco方式をそのまま利用できます。
+        """
         print("\n=== モジュール初期化開始 ===")
         camera_info_list = self._discover_cameras()
         camera_id = self._select_camera(camera_info_list)
@@ -42,9 +49,23 @@ class CameraLocalizationApp:
         if not self.camera_handler.initialize():
             raise RuntimeError(f"カメラ {camera_id} の初期化に失敗しました")
 
-        print("\n[2] マーカー検出器を初期化中...")
-        marker_detector = MarkerDetector(self.config.marker.dictionary)
-        print(f"    [OK] 辞書: {self.config.marker.dictionary}")
+        # 使わない方式のモジュールはNoneにして、FramePipeline側で分岐します。
+        marker_detector = None
+        markerless_localizer = None
+        if self.config.localization.mode == "markerless":
+            print("\n[2] マーカーレスローカライザーを初期化中...")
+            markerless_localizer = MarkerlessLocalizer(
+                map_file=self.config.markerless.map_file,
+                device=self.config.markerless.device,
+                max_keypoints=self.config.markerless.max_keypoints,
+                min_matches=self.config.markerless.min_matches,
+                min_inliers=self.config.markerless.min_inliers,
+            )
+            print(f"    [OK] マップ: {self.config.markerless.map_file}")
+        else:
+            print("\n[2] マーカー検出器を初期化中...")
+            marker_detector = MarkerDetector(self.config.marker.dictionary)
+            print(f"    [OK] 辞書: {self.config.marker.dictionary}")
 
         print("\n[3] ポーズ推定器を初期化中...")
         pose_estimator = PoseEstimator(self.config.calibration.parameters_file)
@@ -53,6 +74,7 @@ class CameraLocalizationApp:
         wireframe_renderer = WireframeRenderer(
             camera_matrix=pose_estimator.get_camera_matrix(),
             wireframe_scale=self.config.processing.wireframe_scale,
+            image_size=pose_estimator.get_image_size(),
         )
 
         print("\n[5] UIマネージャーを初期化中...")
@@ -64,6 +86,7 @@ class CameraLocalizationApp:
         self.pipeline = FramePipeline(
             config=self.config,
             marker_detector=marker_detector,
+            markerless_localizer=markerless_localizer,
             pose_estimator=pose_estimator,
             wireframe_renderer=wireframe_renderer,
             ui_manager=self.ui_manager,

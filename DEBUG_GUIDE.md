@@ -6,12 +6,11 @@
 
 ## 原因の可能性
 
-このアプリケーションはGUI（OpenCV、設定時のみmatplotlib）と**ユーザー入力（カメラ選択）**を使用しているため、デバッグ実行時に以下の問題が生じる可能性があります：
+このアプリケーションはOpenCV GUIと**ユーザー入力（カメラ選択）**を使用するため、デバッグ実行時に以下の問題が生じる可能性があります：
 
 1. **コンソール入力不可**: 仮想環境の標準入力が正しく接続されていない
 2. **Pythonインタプリタ不正**: システムの Python が使用されている（仮想環境ではない）
-3. **描画バックエンド**: matplotlibモードはOpenCVモードより負荷が高い
-4. **debugpy の問題**: 古いバージョンや互換性の問題
+3. **debugpy の問題**: 古いバージョンや互換性の問題
 
 ## 解決方法
 
@@ -81,15 +80,6 @@
 **解決**: 
 - 実行設定を「統合ターミナル」に変更して再試行
 
-### matplotlibモードで3Dビューが表示されない
-**原因**: matplotlibモードの描画に失敗している
-
-**解決**:
-- `config.yaml` の `debug.render_mode` を `opencv` に戻す
-- 統合ターミナルでの実行を試す
-
-matplotlibは起動時ではなく、`draw_3d_view_matplotlib()`が呼ばれたときだけ読み込まれます。標準の`opencv`モードで起動時にmatplotlibのimportが表示される場合は、古いコードが残っていないか確認してください。
-
 ### debugpyの初期化中に止まる
 
 次のように`debugpy`の内部で`KeyboardInterrupt`が発生する場合、`main.py`の処理にはまだ到達していません。
@@ -122,10 +112,9 @@ Remove-Item -Recurse -Force .venv
 ```yaml
 debug:
    enable_3d_render: true
-   render_mode: "opencv"
 ```
 
-`opencv` は `cv2.projectPoints` を使う高速描画です。`matplotlib` は任意の詳細表示モードで、描画に失敗した場合は自動的にOpenCVへフォールバックします。リアルタイム表示ではOpenCVモードを推奨します。
+3DビューはOpenCVの`cv2.projectPoints`を使って描画します。描画バックエンドの切り替えはありません。
 
 `pose_estimator.py` は `solvePnP` の `rvec` と `tvec` をそのまま使用します。推定後にコンソールへ次の再投影誤差が表示されます。
 

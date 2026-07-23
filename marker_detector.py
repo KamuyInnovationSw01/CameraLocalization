@@ -75,7 +75,11 @@ class MarkerDetector:
         info = {
             "detected": False,
             "count": 0,
-            "markers": []
+            "markers": [],
+            # 描画側が検出結果を再計算しなくて済むよう、元の検出データも
+            # 同じ情報オブジェクトにまとめて返します。
+            "corners": corners,
+            "ids": ids,
         }
         
         if corners is None or ids is None:

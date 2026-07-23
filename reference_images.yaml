@@ -1,0 +1,9 @@
+reference_images:
+  - file: "sample/image0.jpg"
+  - file: "sample/image1.jpg"
+    position_m: 0.05
+  - file: "sample/image2.jpg"
+  - file: "sample/image3.jpg"
+  - file: "sample/image4.jpg"
+  - file: "sample/image5.jpg"
+    

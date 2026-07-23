@@ -19,9 +19,12 @@ class PoseEstimator:
         Args:
             calibration_file: キャリブレーションパラメータのJSONファイルパス
         """
-        self.camera_matrix = None
-        self.dist_coeffs = None
-        self.image_size = None
+        # キャリブレーション読み込み前は未設定ですが、コンストラクター終了時には
+        # _load_calibration()によって必ずNumPy配列へ置き換えられます。型注釈を
+        # 付けて、Pylanceにも各値の実体が配列であることを伝えます。
+        self.camera_matrix: Optional[np.ndarray] = None
+        self.dist_coeffs: Optional[np.ndarray] = None
+        self.image_size: Optional[tuple[int, int]] = None
         
         self._load_calibration(calibration_file)
     
@@ -39,7 +42,10 @@ class PoseEstimator:
             # キャリブレーションパラメータを取得
             self.camera_matrix = np.array(calib_data["cameraMatrix"], dtype=np.float32)
             self.dist_coeffs = np.array(calib_data["distCoeffs"], dtype=np.float32).flatten()
-            self.image_size = tuple(calib_data["imageSize"])
+            image_size_values = [int(value) for value in calib_data["imageSize"]]
+            if len(image_size_values) != 2:
+                raise ValueError("imageSizeは幅と高さの2要素で指定してください")
+            self.image_size = (image_size_values[0], image_size_values[1])
             
             print(f"キャリブレーション読み込み成功: {calibration_file}")
             print(f"カメラ行列:\n{self.camera_matrix}")
@@ -67,9 +73,14 @@ class PoseEstimator:
                 - rvec: 回転ベクトル (3,)
                 - tvec: 並進ベクトル (3,)
         """
-        if self.camera_matrix is None:
+        if self.camera_matrix is None or self.dist_coeffs is None:
             print("エラー: キャリブレーションパラメータが読み込まれていません。")
             return False, None, None
+
+        # 上の条件でNoneを排除したローカル変数を使います。インスタンス属性は
+        # Pylanceがメソッド途中で再代入される可能性を考慮するためです。
+        camera_matrix = self.camera_matrix
+        dist_coeffs = self.dist_coeffs
         
         # マーカーの3D座標（マーカー座標系）
         # ArUcoの順序: 左上(TL) -> 右上(TR) -> 右下(BR) -> 左下(BL)
@@ -89,8 +100,8 @@ class PoseEstimator:
         success, rvec, tvec = cv2.solvePnP(
             objectPoints=object_points,
             imagePoints=image_points,
-            cameraMatrix=self.camera_matrix,
-            distCoeffs=self.dist_coeffs,
+            cameraMatrix=camera_matrix,
+            distCoeffs=dist_coeffs,
             useExtrinsicGuess=False,
             flags=cv2.SOLVEPNP_IPPE_SQUARE
         )
@@ -108,9 +119,10 @@ class PoseEstimator:
             objectPoints=object_points,
             rvec=rvec,
             tvec=tvec,
-            cameraMatrix=self.camera_matrix,
-            distCoeffs=self.dist_coeffs
+            cameraMatrix=camera_matrix,
+            distCoeffs=dist_coeffs
         )
+        projected_points = np.asarray(projected_points, dtype=np.float32)
         reprojection_errors = np.linalg.norm(
             projected_points.reshape(4, 2) - image_points,
             axis=1
@@ -139,6 +151,8 @@ class PoseEstimator:
         """
         # 回転ベクトルから回転行列を取得
         R, _ = cv2.Rodrigues(rvec)
+        # OpenCVの型スタブはMatLikeを返すため、NumPyの行列として明示します。
+        R = np.asarray(R, dtype=np.float32)
         
         # 回転の大きさ（度数法）
         angle_rad = np.linalg.norm(rvec)
@@ -150,8 +164,9 @@ class PoseEstimator:
         camera_position = (-R.T @ tvec).flatten()
 
         pose_info = {
-            "rvec": rvec.flatten().tolist(),  # (3,)
-            "tvec": tvec.flatten().tolist(),  # (3,)
+            # 描画・再投影でそのまま使えるよう、姿勢ベクトルはNumPy配列で保持します。
+            "rvec": rvec.copy(),
+            "tvec": tvec.copy(),
             "rotation_matrix": R.tolist(),     # (3, 3)
             "rotation_angle_deg": float(angle_deg),
             "translation_distance_m": float(distance_m),
@@ -162,8 +177,18 @@ class PoseEstimator:
     
     def get_camera_matrix(self) -> np.ndarray:
         """カメラ行列を取得します。"""
+        if self.camera_matrix is None:
+            raise RuntimeError("カメラ行列が読み込まれていません")
         return self.camera_matrix.copy()
     
     def get_dist_coeffs(self) -> np.ndarray:
         """歪み係数を取得します。"""
+        if self.dist_coeffs is None:
+            raise RuntimeError("歪み係数が読み込まれていません")
         return self.dist_coeffs.copy()
+
+    def get_image_size(self) -> tuple[int, int]:
+        """キャリブレーション時の画像サイズを(width, height)で取得します。"""
+        if self.image_size is None:
+            raise RuntimeError("画像サイズが読み込まれていません")
+        return self.image_size

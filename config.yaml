@@ -3,6 +3,10 @@ calibration:
   # キャリブレーションパラメータファイルのパス（相対パス）
   parameters_file: "eMeetNova.json"
 
+# 使用するローカライゼーション方式: marker または markerless
+localization:
+  mode: "markerless"
+
 # ARマーカー設定
 marker:
   # マーカーサイズ（メートル単位）
@@ -11,6 +15,14 @@ marker:
   dictionary: "DICT_4X4_50"
   # マーカーの期待ID（自動検出する場合はnull）
   expected_id: 1
+
+# マーカーレス方式の簡易3Dマップ設定
+markerless:
+  map_file: "markerless_map.npz"
+  device: "auto"  # auto, cuda, cpu
+  max_keypoints: 2048
+  min_matches: 30
+  min_inliers: 15
 
 # UI ウィンドウ設定
 ui:
@@ -43,5 +55,3 @@ debug:
   show_pose_info: true
   # 3D ビュー描画を有効化（無効にするとパフォーマンス向上、画面は暗いグレーになります）
   enable_3d_render: true
-  # 3D ビューのレンダリングモード: "opencv" (高速・軽量) または "matplotlib" (詳細・リッチな3Dボックス表示)
-  render_mode: "opencv"

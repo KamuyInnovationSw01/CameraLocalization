@@ -1,4 +1,4 @@
-# カメラローカライゼーション - ARマーカーポーズ推定システム 仕様書
+# カメラローカライゼーション - マーカー／マーカーレスポーズ推定システム 仕様書
 
 **バージョン**: 1.0  
 **日付**: 2026-07-01  
@@ -8,7 +8,7 @@
 
 ## 1. 概要
 
-このシステムは、USBカメラで撮影したARマーカー（ArUco）映像をリアルタイムで処理し、カメラの3次元ポーズ（位置と姿勢）を推定します。推定されたポーズは、ワイヤフレームの3D表示として2つのウィンドウに表示されます。
+このシステムは、USBカメラで撮影したARマーカー（ArUco）または事前登録した剛体被写体の映像をリアルタイムで処理し、カメラの3次元ポーズ（位置と姿勢）を推定します。推定されたポーズは、ワイヤフレームの3D表示として2つのウィンドウに表示されます。
 
 **主要目標**:
 - リアルタイムでARマーカーを検出
@@ -41,9 +41,12 @@ CameraLocalization
 ├── camera_discovery.py        # カメラ一覧・製品名・基本情報の検出
 ├── camera_handler.py          # カメラ初期化・フレーム取得・解像度探索
 ├── marker_detector.py         # ArUcoマーカー検出と情報化
+├── markerless_features.py     # ALIKED／LightGlueの特徴処理
+├── build_markerless_map.py    # 参照画像から簡易3Dマップを生成
+├── markerless_localizer.py    # 簡易3Dマップから実行時姿勢を推定
 ├── pose_estimator.py          # 3Dポーズ推定
 ├── pipeline.py                # 1フレームの検出・推定・描画
-├── wireframe_renderer.py      # OpenCV／matplotlibによる3D描画
+├── wireframe_renderer.py      # OpenCVによる3D描画
 ├── ui_manager.py              # 2ウィンドウUI管理
 ├── generate_markers.py        # ArUcoマーカー生成CLI
 └── tests/                     # カメラ不要の単体テスト
@@ -67,7 +70,8 @@ CameraLocalization
 │                                             │
 │ [フレーム取得] (camera_handler)              │
 │       ↓                                     │
-│ [マーカー検出] (marker_detector)             │
+│ [マーカー／特徴点検出] (marker_detector       │
+│  またはmarkerless_localizer)                 │
 │       ↓                                     │
 │ [ポーズ推定] (pose_estimator)                │
 │       ↓                                     │
@@ -77,7 +81,9 @@ CameraLocalization
 └─────────────────────────────────────────────┘
 ```
 
-マーカーが検出されなかったフレームでは、ポーズ推定と3D描画をスキップします。複数のマーカーが検出された場合は、最初のマーカーを使ってポーズを推定します。3D描画は`config.yaml`の`debug.render_mode`で選択し、標準はOpenCVです。matplotlibはmatplotlibモードを選択した場合だけ読み込まれます。
+マーカーが検出されなかったフレームでは、ポーズ推定と3D描画をスキップします。複数のマーカーが検出された場合は、最初のマーカーを使ってポーズを推定します。3D描画はOpenCVの`cv2.projectPoints`を使用します。
+
+`localization.mode`を`markerless`にすると、`markerless.map_file`で指定した簡易3Dマップを読み込みます。マップは`build_markerless_map.py`で生成し、ALIKED特徴量とLightGlue対応点から基準画像1枚目のカメラ座標系を構築します。参照画像2枚目以降の`position_m`は基準位置からの距離の大きさだけを指定し、移動方向と回転は画像対応から推定します。詳細は[REFERENCE_IMAGES_GUIDE.md](REFERENCE_IMAGES_GUIDE.md)を参照してください。
 
 ---
 
@@ -133,7 +139,27 @@ CameraLocalization
 - カメラ ワイヤフレームをスケーリングして表示
 - 背景色：暗いグレー
 
-### 3.5 設定機能
+マーカーレス方式では、カメラ映像にLightGlueの対応点を描画します。緑はPnP/RANSACの
+インライア、赤は外れ値、黄はPnP未実行または未検証の対応点を表します。3Dビューでは
+マーカー四角形とマーカー座標軸を表示せず、保存済み簡易3Dマップの点を同じ色規則で表示します。
+対応点不足で姿勢が得られないフレームでは、3Dビューを暗い背景へ戻します。
+
+### 3.5 マーカーレス機能
+
+| 項目 | 仕様 |
+|------|------|
+| 特徴抽出 | ALIKED |
+| 特徴対応 | LightGlue |
+| マップ生成 | `build_markerless_map.py`で事前生成 |
+| 実行時推定 | 簡易3Dマップとの対応点を`solvePnPRansac`へ入力 |
+| スケール | `ref_2`の`position_m`で決定 |
+| `ref_3`以降 | 距離入力なし。既知3D点によるPnPで姿勢推定 |
+| 座標原点 | 参照画像1枚目のカメラ光学中心 |
+| 実行デバイス | CUDA優先（`auto`）、CPUフォールバック |
+
+参照画像の形式とマップ生成手順は[REFERENCE_IMAGES_GUIDE.md](REFERENCE_IMAGES_GUIDE.md)で定義します。
+
+### 3.6 設定機能
 
 | 項目 | 設定項目 |
 |------|---------|
@@ -276,6 +302,12 @@ $$
 - X軸: 右方向
 - Y軸: 下方向
 
+**マーカーレス表示座標系**:
+- 実データは参照画像1枚目のOpenCVカメラ座標系
+- 表示時のみX軸まわり180度回転
+- 表示上の`+Z`は画面下方向
+- 保存済みマップと推定結果の数値は変換しない
+
 **画像座標系**:
 - 原点: 画像の左上
 - X軸: 右方向
@@ -322,7 +354,6 @@ debug:
   show_marker_info: true
   show_pose_info: true
   enable_3d_render: true
-  render_mode: "opencv"
 ```
 
 ---

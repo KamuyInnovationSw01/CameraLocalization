@@ -8,18 +8,18 @@
 - [x] **Step 1: 現状チェックと原因分析**
   - [x] 設定ファイル `config.yaml` の内容と `main.py` の実装を精査する
   - [x] 原因特定: `config.yaml` の `enable_3d_render` が `false` になっていることを確認
-  - [x] ターミナルログやエラーが発生しているかを検証する（matplotlib のテストで引数のバグを発見・修正、正常描画を確認）
+  - [x] ターミナルログやエラーが発生しているかを検証し、OpenCV描画の正常動作を確認する
 
 - [x] **Step 2: 選択肢の追加とデフォルト設定の修正**
   - [x] `config.yaml` の `enable_3d_render` を `true` に変更する
-  - [x] `config.yaml` に描画モードのパラメータ `render_mode: "opencv"` (デフォルト) を追加
-  - [x] `main.py` の `render_output` 内で、描画モードを設定可能なように修正する
+  - [x] 3DビューをOpenCV描画へ統一する
+  - [x] `main.py` の `render_output` 内でOpenCV描画を使用する
 
 - [x] **Step 3: 安全なフォールバックの実装**
-  - [x] `matplotlib` で描画エラーが発生した際、自動的に高速な `opencv` の `draw_3d_view` へフォールバックするエラーハンドリングを実装する
+  - [x] OpenCV描画エラー時に3Dビューを背景画像へフォールバックする
 
 - [x] **Step 4: 動作検証テスト**
-  - [x] アプリケーション実行による表示確認テスト（matplotlib のテストで引数のバグを発見・修正、正常描画を確認）
+  - [x] アプリケーション実行によるOpenCV表示確認テスト
   - [x] テストスクリプト等による確認
 
 - [x] **Step 5: レビューとレッスン記録**
@@ -46,6 +46,6 @@
 - [x] `opencv-contrib-python`へ依存を統一
 - [x] Python公式版3.11で`.venv`を再構築
 - [x] VS Codeデバッグ設定を統合ターミナル1構成へ整理
-- [x] matplotlibを遅延import化し、OpenCV標準起動時の初期化停止を回避
-- [x] 設定・マーカー検出の単体テスト3件を追加・実行
+- [x] matplotlib依存を削除し、OpenCV専用の3D描画へ整理
+- [x] 設定・マーカー検出・姿勢推定・3D描画の単体テスト9件を追加・実行
 

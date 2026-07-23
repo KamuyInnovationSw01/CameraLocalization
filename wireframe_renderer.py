@@ -10,16 +10,34 @@ from typing import Tuple
 class WireframeRenderer:
     """3D ワイヤフレーム描画を行うクラス"""
     
-    def __init__(self, camera_matrix: np.ndarray, wireframe_scale: float = 0.15):
+    def __init__(
+        self,
+        camera_matrix: np.ndarray,
+        wireframe_scale: float = 0.15,
+        image_size: tuple[int, int] | None = None,
+    ):
         """
         ワイヤフレーム描画器を初期化します。
         
         Args:
             camera_matrix: カメラ行列 (3, 3)
             wireframe_scale: ワイヤフレームのスケール（相対的）
+            image_size: キャリブレーション画像サイズ (width, height)。指定時は
+                この画像の四隅からフラスタムを計算します。
         """
         self.camera_matrix = camera_matrix.copy()
         self.wireframe_scale = wireframe_scale
+        # 3Dビューの仮想投影では歪みを適用しないため、OpenCVの型付き引数として
+        # 明示的なゼロ歪み係数を渡します。
+        self.zero_dist_coeffs = np.zeros(5, dtype=np.float32)
+        if image_size is None:
+            # 旧呼び出しとの互換用。通常はキャリブレーションの実画像サイズを渡します。
+            self.image_size = (
+                int(round(2 * self.camera_matrix[0, 2])),
+                int(round(2 * self.camera_matrix[1, 2])),
+            )
+        else:
+            self.image_size = (int(image_size[0]), int(image_size[1]))
         
         # ウィンドウサイズ（描画用）
         self.window_width = 960
@@ -27,6 +45,31 @@ class WireframeRenderer:
         
         # 背景色
         self.bg_color = (50, 50, 50)  # 暗いグレー
+
+    def create_frustum_vertices(self, depth: float) -> np.ndarray:
+        """カメラ行列の画角に一致するフラスタム頂点を作成します。
+
+        画像平面の四隅をピンホールカメラモデルで逆投影します。
+        ``x=(u-cx)z/fx``、``y=(v-cy)z/fy``なので、固定の開き係数ではなく
+        実際の焦点距離と主点から水平・垂直画角、および主点の偏りを反映できます。
+        頂点順は左上、右上、右下、左下で、OpenCVの+Z方向を奥とします。
+        """
+        fx = float(self.camera_matrix[0, 0])
+        fy = float(self.camera_matrix[1, 1])
+        cx = float(self.camera_matrix[0, 2])
+        cy = float(self.camera_matrix[1, 2])
+        width, height = self.image_size
+        if fx <= 0 or fy <= 0 or width <= 0 or height <= 0:
+            raise ValueError("カメラ行列または画像サイズが不正です")
+
+        corners = np.array(
+            [[0.0, 0.0], [float(width), 0.0], [float(width), float(height)], [0.0, float(height)]],
+            dtype=np.float32,
+        )
+        xy = np.empty_like(corners)
+        xy[:, 0] = (corners[:, 0] - cx) / fx * depth
+        xy[:, 1] = (corners[:, 1] - cy) / fy * depth
+        return np.vstack([np.zeros((1, 3), dtype=np.float32), np.column_stack([xy, np.full(4, depth)])])
     
     def create_camera_wireframe(self) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -50,22 +93,9 @@ class WireframeRenderer:
         # フラスタムの奥行き（メートル）
         frustum_depth = 0.1  # 10 cm
         
-        # フラスタム（視点からのピラミッド形）のコーナー座標
-        # 視点: (0, 0, 0)
-        # 前面（視点直前）: z=0 付近の小さい矩形
-        # 背面: z=frustum_depth の大きい矩形
-        # 
-        # フラスタムのFOV（視野角）を定義（ボディ寸法から推定）
-        fov_factor = 1.5  # フラスタムの開き具合
-        
-        frustum_vertices = np.array([
-            [0, 0, 0],                                      # 0: 視点（前面中央）
-            # 背面（奥行き10cm）のコーナー
-            [-body_width / 2 * fov_factor, -body_height / 2 * fov_factor, frustum_depth],   # 1: 左上奥
-            [body_width / 2 * fov_factor, -body_height / 2 * fov_factor, frustum_depth],    # 2: 右上奥
-            [body_width / 2 * fov_factor, body_height / 2 * fov_factor, frustum_depth],     # 3: 右下奥
-            [-body_width / 2 * fov_factor, body_height / 2 * fov_factor, frustum_depth],    # 4: 左下奥
-        ], dtype=np.float32)
+        # フラスタムはカメラ行列から算出します。これにより、カメラごとの
+        # 水平・垂直画角や主点のずれが3Dビューへ反映されます。
+        frustum_vertices = self.create_frustum_vertices(frustum_depth)
         
         # ボディ（直方体）の座標
         # 視点 (z=0) から見て後ろ側 (z < 0) に伸ばす
@@ -146,7 +176,7 @@ class WireframeRenderer:
             rvec=rvec,
             tvec=tvec,
             cameraMatrix=self.camera_matrix,
-            distCoeffs=None
+            distCoeffs=self.zero_dist_coeffs
         )
         
         return image_points.reshape(-1, 2)
@@ -210,7 +240,9 @@ class WireframeRenderer:
         self,
         rvec: np.ndarray,
         tvec: np.ndarray,
-        marker_size_m: float = 0.1
+        marker_size_m: float = 0.1,
+        map_points: np.ndarray | None = None,
+        map_point_colors: np.ndarray | None = None,
     ) -> np.ndarray:
         """
         3D ワイヤフレーム + マーカー + 座標軸の独立したビューを作成します。
@@ -219,6 +251,8 @@ class WireframeRenderer:
             rvec: 回転ベクトル
             tvec: 並進ベクトル
             marker_size_m: マーカーサイズ（メートル）
+            map_points: マーカーレス時に表示する基準座標系の3Dマップ点。
+            map_point_colors: map_pointsと同じ順序のBGR色配列。
         
         Returns:
             np.ndarray: 3D ビュー画像
@@ -231,7 +265,10 @@ class WireframeRenderer:
         # カメラのワイヤフレーム構造を作成（ローカル座標系）
         vertices_local, camera_edges = self.create_camera_wireframe()
         
-        # マーカー頂点の作成（世界座標系、Z=0平面）
+        markerless_mode = map_points is not None
+
+        # マーカー頂点の作成（世界座標系、Z=0平面）。マーカーレス時は
+        # マーカーそのものを表示せず、代わりにmap_pointsを表示します。
         half_marker = marker_size_m / 2.0
         marker_vertices = np.array([
             [-half_marker, -half_marker, 0],
@@ -244,7 +281,8 @@ class WireframeRenderer:
             [0, 1], [1, 2], [2, 3], [3, 0]
         ])
         
-        # マーカーの座標軸（世界座標系の中心から）
+        # マーカーの座標軸（世界座標系の中心から）。マーカーレス時は
+        # マップ上の人工的な原点・軸を表示しないため使用しません。
         axis_length = marker_size_m * 1.5
         axis_vertices = np.array([
             [0, 0, 0],                  # 原点
@@ -257,10 +295,36 @@ class WireframeRenderer:
         rotation_matrix, _ = cv2.Rodrigues(rvec)
         R_wc = rotation_matrix.T
         camera_pos = (-R_wc @ tvec).ravel()
+
+        # マーカーレス表示では、基準座標系の+Zが画面下向きになるように、
+        # 表示用座標だけをX軸まわり180度回転します。diag(1,-1,-1)は
+        # 行列式が+1の正規回転なので、右手系を維持したままZ方向を反転できます。
+        # 推定値や保存済みマップの座標そのものは変更しません。
+        display_rotation = (
+            np.diag([1.0, -1.0, -1.0]).astype(np.float32)
+            if markerless_mode
+            else np.eye(3, dtype=np.float32)
+        )
+        camera_pos = display_rotation @ camera_pos
         
         # カメラローカルの頂点群を世界座標系に変換
         # p_world = R_wc @ p_local + camera_pos
-        vertices_world = (R_wc @ vertices_local.T).T + camera_pos
+        vertices_world = (
+            display_rotation @ (R_wc @ vertices_local.T)
+        ).T + camera_pos
+
+        # 表示対象の基準点を先に作ります。仮想カメラをシーンの大きさに対して
+        # 十分遠ざけることで、透視投影による奥行き方向の誇張を抑えます。
+        display_points = (
+            (
+                display_rotation
+                @ np.asarray(map_points, dtype=np.float32).T
+            ).T
+            if markerless_mode
+            else np.vstack([marker_vertices, axis_vertices])
+        )
+        scene_points = np.vstack([display_points, vertices_world.astype(np.float32)])
+        scene_extent = max(float(np.max(np.linalg.norm(scene_points, axis=1))), 0.15)
         
         # 3. 仮想第3者カメラ（LookAtビューポーズ）の構築
         # 全体が常にいいパースで画面中央に収まるように仮想カメラの位置とターゲットを動的に調整
@@ -268,14 +332,23 @@ class WireframeRenderer:
         dist = max(0.15, dist)  # 最低スケサインターバル
         
         # 注視点はマーカー(原点)から少しカメラ側に寄せた位置
-        target = camera_pos * 0.3
+        if markerless_mode and len(map_points) > 0:
+            map_center = np.mean(
+                display_rotation @ np.asarray(map_points, dtype=np.float32).T,
+                axis=1,
+            )
+            target = map_center * 0.7 + camera_pos * 0.3
+        else:
+            target = camera_pos * 0.3
         
         # 斜め右上（Xがプラス、Yがマイナス、Zがプラス）から見下ろす基本方向
         view_dir = np.array([0.7, -1.3, 0.9], dtype=np.float32)
         view_dir /= np.linalg.norm(view_dir)
         
-        # 仮想カメラの座標
-        eye = target + view_dir * (dist * 1.7)
+        # 仮想カメラの座標。従来の距離だけでなくシーンの大きさも考慮して
+        # 後退させます。距離を大きくすると透視投影のパースが弱くなります。
+        eye_distance = max(dist * 1.7, scene_extent * 4.0)
+        eye = target + view_dir * eye_distance
         
         # 仮想カメラの回転/並進行列の計算 (LookAt)
         up = np.array([0, 0, 1], dtype=np.float32)  # 世界座標のZ軸が上方向
@@ -303,18 +376,14 @@ class WireframeRenderer:
         # 4. 全ての表示対象が画面内に収まる仮想カメラ行列を作る。
         # 投影前の全頂点から焦点距離と主点を計算することで、カメラが
         # マーカーから離れた場合でも、カメラ本体が画面外へ出ないようにする。
-        all_vertices_world = np.vstack([
-            marker_vertices,
-            axis_vertices,
-            vertices_world.astype(np.float32)
-        ])
+        all_vertices_world = np.vstack([display_points, vertices_world.astype(np.float32)])
         identity_camera = np.eye(3, dtype=np.float32)
         normalized_points, _ = cv2.projectPoints(
             all_vertices_world,
             r_view,
             t_view,
             identity_camera,
-            None
+            self.zero_dist_coeffs
         )
         normalized_points = normalized_points.reshape(-1, 2)
 
@@ -340,45 +409,56 @@ class WireframeRenderer:
         ], dtype=np.float32)
         
         # 5. 各3D点群を2D画像座標に投影
-        # マーカー
-        marker_2d, _ = cv2.projectPoints(marker_vertices, r_view, t_view, K_virtual, None)
-        marker_2d = marker_2d.reshape(-1, 2)
-        
-        # 座標軸
-        axis_2d, _ = cv2.projectPoints(axis_vertices, r_view, t_view, K_virtual, None)
-        axis_2d = axis_2d.reshape(-1, 2)
+        display_2d, _ = cv2.projectPoints(
+            display_points, r_view, t_view, K_virtual, self.zero_dist_coeffs
+        )
+        display_2d = display_2d.reshape(-1, 2)
+        axis_2d: np.ndarray | None = None
         
         # カメラワイヤフレーム
-        cam_vertices_2d, _ = cv2.projectPoints(vertices_world.astype(np.float32), r_view, t_view, K_virtual, None)
+        cam_vertices_2d, _ = cv2.projectPoints(
+            vertices_world.astype(np.float32),
+            r_view,
+            t_view,
+            K_virtual,
+            self.zero_dist_coeffs,
+        )
         cam_vertices_2d = cam_vertices_2d.reshape(-1, 2)
         
         # 6. レンダリング/描画
-        # A. マーカー用半透明塗りつぶしと枠線
-        try:
-            overlay = view.copy()
-            cv2.fillPoly(overlay, [marker_2d.astype(np.int32)], (0, 0, 120))  # 濃い赤
-            cv2.addWeighted(overlay, 0.25, view, 0.75, 0, view)
-            for edge in marker_edges:
-                p1 = tuple(marker_2d[edge[0]].astype(int))
-                p2 = tuple(marker_2d[edge[1]].astype(int))
-                cv2.line(view, p1, p2, (0, 0, 180), 2)  # 赤い枠線
-        except Exception:
-            pass
-            
-        # B. 座標軸（世界座標の原点中心、マーカー基準）
-        origin = tuple(axis_2d[0].astype(int))
-        # X軸 (赤)
-        x_pt = tuple(axis_2d[1].astype(int))
-        cv2.line(view, origin, x_pt, (0, 0, 255), 2)
-        cv2.putText(view, "X_m", (x_pt[0] + 5, x_pt[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 255), 1)
-        # Y軸 (緑)
-        y_pt = tuple(axis_2d[2].astype(int))
-        cv2.line(view, origin, y_pt, (0, 255, 0), 2)
-        cv2.putText(view, "Y_m", (y_pt[0] + 5, y_pt[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
-        # Z軸 (青)
-        z_pt = tuple(axis_2d[3].astype(int))
-        cv2.line(view, origin, z_pt, (255, 0, 0), 2)
-        cv2.putText(view, "Z_m", (z_pt[0] + 5, z_pt[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 0, 0), 1)
+        if markerless_mode:
+            # マーカーレス時は、保存済みマップ点を対応状態別に描画します。
+            colors = (
+                np.asarray(map_point_colors, dtype=np.uint8)
+                if map_point_colors is not None
+                else np.tile(np.array([[150, 150, 150]], dtype=np.uint8), (len(display_2d), 1))
+            )
+            for point, color in zip(display_2d, colors):
+                cv2.circle(view, tuple(np.round(point).astype(int)), 3, tuple(int(v) for v in color), -1)
+        else:
+            # markerモードでは従来どおりマーカー四角形と座標軸を描画します。
+            marker_2d = display_2d[:4]
+            axis_2d = display_2d[4:]
+            try:
+                overlay = view.copy()
+                cv2.fillPoly(overlay, [marker_2d.astype(np.int32)], (0, 0, 120))
+                cv2.addWeighted(overlay, 0.25, view, 0.75, 0, view)
+                for edge in marker_edges:
+                    p1 = tuple(marker_2d[edge[0]].astype(int))
+                    p2 = tuple(marker_2d[edge[1]].astype(int))
+                    cv2.line(view, p1, p2, (0, 0, 180), 2)
+            except Exception:
+                pass
+
+            origin = tuple(axis_2d[0].astype(int))
+            for axis_index, color, label in (
+                (1, (0, 0, 255), "X_m"),
+                (2, (0, 255, 0), "Y_m"),
+                (3, (255, 0, 0), "Z_m"),
+            ):
+                axis_point = tuple(axis_2d[axis_index].astype(int))
+                cv2.line(view, origin, axis_point, color, 2)
+                cv2.putText(view, label, (axis_point[0] + 5, axis_point[1] + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
         
         # C. カメラワイヤフレーム
         for edge in camera_edges:
@@ -406,225 +486,21 @@ class WireframeRenderer:
         # D. カメラ位置のハイライト
         cam_center = tuple(cam_vertices_2d[0].astype(int))
         cv2.circle(view, cam_center, 6, (0, 255, 255), -1)  # 黄色の光学中心マーク
-        cv2.circle(view, origin, 6, (255, 255, 0), 2)       # シアンのマーカー原点マーク
+        if axis_2d is not None:
+            cv2.circle(view, tuple(axis_2d[0].astype(int)), 6, (255, 255, 0), 2)
         
         # E. テキストレイアウト説明
-        cv2.putText(view, "3D View: Camera Pose + Marker Axes", (10, 30),
+        title = "3D View: Camera Pose + Map" if markerless_mode else "3D View: Camera Pose + Marker Axes"
+        legend = (
+            "Gray: Map | Green: Inlier | Red: Outlier | Yellow: Unverified"
+            if markerless_mode
+            else "Orange: Camera Body | Cyan: Frustum | Yellow: Optical Axis | Red: Marker"
+        )
+        cv2.putText(view, title, (10, 30),
                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(view, "Orange: Camera Body | Cyan: Frustum | Yellow: Optical Axis | Red: Marker",
-                   (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
-        
+        cv2.putText(view, legend,
+               (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
         return view
-    
-    def draw_3d_view_matplotlib(
-        self,
-        rvec: np.ndarray,
-        tvec: np.ndarray,
-        marker_size_m: float = 0.1
-    ) -> np.ndarray:
-        """
-        matplotlibを使用した3D ビューの作成。
-        3次元グリッドボックス + マーカー（底面）+ カメラワイヤフレーム
-        
-        Args:
-            rvec: 回転ベクトル
-            tvec: 並進ベクトル
-            marker_size_m: マーカーサイズ（メートル）
-        
-        Returns:
-            np.ndarray: RGB画像 (720, 960, 3)
-        """
-        # OpenCV標準モードの起動を妨げないよう、matplotlibは必要時だけ読み込む。
-        import matplotlib
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
-        plt.ioff()
-        from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-        # matplotlibの図を作成（背景色あり）
-        fig = plt.figure(figsize=(960/100, 720/100), dpi=100, facecolor=(0.2, 0.2, 0.2))
-        ax = fig.add_subplot(111, projection='3d')
-        
-        # 回転マトリックスを取得
-        rotation_matrix, _ = cv2.Rodrigues(rvec)
-        
-        # マーカー座標系でのカメラ位置：camera_pos = -R^T @ tvec
-        # 反転解補正は pose_estimator 側で実施済みなのでここではそのまま使う
-        camera_pos = (-rotation_matrix.T @ tvec).ravel()
-        R_wc = rotation_matrix.T   # カメラ座標系 → 世界座標系（表示用）
-        
-        # グリッドボックスのサイズ（マーカーとカメラが収まるよう自動スケール）
-        # XY方向：マーカーとカメラのXYオフセットを包含
-        xy_extent = max(marker_size_m, abs(camera_pos[0]), abs(camera_pos[1])) * 1.4
-        xy_extent = max(0.2, xy_extent)
-        # Z方向：底面(0)からカメラの少し上まで
-        box_height = max(0.3, camera_pos[2] * 1.25)
-        
-        grid_range = np.linspace(-xy_extent, xy_extent, 5)
-        z_range = np.linspace(0, box_height, 5)
-        
-        # 底面グリッド（X-Y平面、z=0：マーカーが置かれる面）
-        for g in grid_range:
-            ax.plot([g, g], [-xy_extent, xy_extent], [0, 0], 
-                   'gray', alpha=0.3, linewidth=0.5)
-            ax.plot([-xy_extent, xy_extent], [g, g], [0, 0], 
-                   'gray', alpha=0.3, linewidth=0.5)
-        
-        # 側面グリッド（奥の2面）
-        for z in z_range:
-            ax.plot([-xy_extent, xy_extent], [xy_extent, xy_extent], [z, z], 
-                   'gray', alpha=0.1, linewidth=0.5)
-            ax.plot([xy_extent, xy_extent], [-xy_extent, xy_extent], [z, z], 
-                   'gray', alpha=0.1, linewidth=0.5)
-        
-        # ボックスの枠線（底面 z=0、頂面 z=box_height）
-        box_vertices = np.array([
-            [-xy_extent, -xy_extent, 0],
-            [xy_extent, -xy_extent, 0],
-            [xy_extent, xy_extent, 0],
-            [-xy_extent, xy_extent, 0],
-            [-xy_extent, -xy_extent, box_height],
-            [xy_extent, -xy_extent, box_height],
-            [xy_extent, xy_extent, box_height],
-            [-xy_extent, xy_extent, box_height],
-        ])
-        
-        box_edges = [
-            [0, 1], [1, 2], [2, 3], [3, 0],  # 底面
-            [4, 5], [5, 6], [6, 7], [7, 4],  # 頂面
-            [0, 4], [1, 5], [2, 6], [3, 7],  # 側面
-        ]
-        
-        for edge in box_edges:
-            p1 = box_vertices[edge[0]]
-            p2 = box_vertices[edge[1]]
-            ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]], 
-                   'white', alpha=0.3, linewidth=1)
-        
-        # マーカーを底面中央（原点、z=0）に平置きで描画（赤い正方形）
-        # マーカーは世界座標系の基準なので回転を適用せずXY平面に配置する
-        half_marker = marker_size_m / 2
-        marker_corners = np.array([
-            [-half_marker, -half_marker, 0],
-            [half_marker, -half_marker, 0],
-            [half_marker, half_marker, 0],
-            [-half_marker, half_marker, 0],
-            [-half_marker, -half_marker, 0],  # 閉じる
-        ])
-        ax.plot(marker_corners[:, 0], marker_corners[:, 1], marker_corners[:, 2],
-               'r-', linewidth=3, label='Marker')
-        ax.scatter(marker_corners[:4, 0], marker_corners[:4, 1], marker_corners[:4, 2],
-                  color='red', s=50, marker='o')
-        
-        # === カメラの描画 ===
-        # カメラ本体（長方形の箱）をカメラ座標系で定義し世界座標へ変換
-        cam_scale = marker_size_m * 1.0
-        bw, bh, bd = cam_scale * 0.5, cam_scale * 0.5, cam_scale * 1.0  # 幅・高さ・奥行
-        body_local = np.array([
-            [-bw, -bh, -bd], [bw, -bh, -bd], [bw, bh, -bd], [-bw, bh, -bd],  # 背面
-            [-bw, -bh, 0.0], [bw, -bh, 0.0], [bw, bh, 0.0], [-bw, bh, 0.0],  # 前面（レンズ側）
-        ])
-        body_world = (R_wc @ body_local.T).T + camera_pos
-        body_edges = [
-            [0, 1], [1, 2], [2, 3], [3, 0],  # 背面
-            [4, 5], [5, 6], [6, 7], [7, 4],  # 前面
-            [0, 4], [1, 5], [2, 6], [3, 7],  # 奥行
-        ]
-        for i, edge in enumerate(body_edges):
-            p1 = body_world[edge[0]]
-            p2 = body_world[edge[1]]
-            ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]],
-                   'orange', linewidth=2, label='Camera Body' if i == 0 else '')
-        
-        # フラスタム（前面レンズからの視錐台）
-        # +Zが光軸方向 = カメラが見る方向（マーカーへ）
-        fscale = marker_size_m * 1.5
-        frustum_local = np.array([
-            [0, 0, 0],
-            [-fscale, -fscale, fscale * 2],
-            [fscale, -fscale, fscale * 2],
-            [fscale, fscale, fscale * 2],
-            [-fscale, fscale, fscale * 2],
-        ])
-        
-        # カメラ座標系 → 世界（マーカー）座標系へ変換
-        # p_world = R^T @ p_cam + camera_pos （ポーズの逆変換）
-        frustum_world = (R_wc @ frustum_local.T).T + camera_pos
-        
-        # フラスタムの描画
-        frustum_edges = [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [2, 3], [3, 4], [4, 1]]
-        for i, edge in enumerate(frustum_edges):
-            p1 = frustum_world[edge[0]]
-            p2 = frustum_world[edge[1]]
-            ax.plot([p1[0], p2[0]], [p1[1], p2[1]], [p1[2], p2[2]], 
-                   'cyan', alpha=0.7, linewidth=1.5, label='Frustum' if i == 0 else '')
-        
-        # カメラ位置を表示
-        ax.scatter(*camera_pos, color='cyan', s=200, marker='*', label='Camera', zorder=5)
-        
-        # 視線方向（光軸）：カメラから+Z方向（見ている向き、マーカーへ）に矢印
-        optical_dir = R_wc @ np.array([0, 0, fscale * 2.5])
-        ax.quiver(camera_pos[0], camera_pos[1], camera_pos[2],
-                 optical_dir[0], optical_dir[1], optical_dir[2],
-                 color='yellow', arrow_length_ratio=0.15, linewidth=2, label='View Direction')
-        
-        # 座標軸の描画（マーカー中心から）
-        axis_length = marker_size_m * 1.2
-        ax.quiver(0, 0, 0, axis_length, 0, 0, color='red', arrow_length_ratio=0.2, linewidth=2, label='X')
-        ax.quiver(0, 0, 0, 0, axis_length, 0, color='green', arrow_length_ratio=0.2, linewidth=2, label='Y')
-        ax.quiver(0, 0, 0, 0, 0, axis_length, color='blue', arrow_length_ratio=0.2, linewidth=2, label='Z')
-        
-        # マーカーの原点を強調
-        ax.scatter(0, 0, 0, color='white', s=150, marker='o', edgecolors='yellow', 
-                  linewidths=2, zorder=5, label='Marker Origin')
-        
-        # 軸設定
-        ax.set_xlabel('X (m)', color='white')
-        ax.set_ylabel('Y (m)', color='white')
-        ax.set_zlabel('Z (m)', color='white')
-        ax.set_xlim(-xy_extent, xy_extent)
-        ax.set_ylim(-xy_extent, xy_extent)
-        ax.set_zlim(0, box_height)  # マーカーが底面(z=0)に来るように
-        # 実寸に合わせたアスペクト比（歪みをなくしカメラ位置を正しく表示）
-        ax.set_box_aspect((2 * xy_extent, 2 * xy_extent, box_height))
-        # 視点：マーカーを底面、カメラを上方に見やすく
-        ax.view_init(elev=20, azim=-70)
-        
-        # 背景色と軸色の設定
-        ax.xaxis.pane.fill = False
-        ax.yaxis.pane.fill = False
-        ax.zaxis.pane.fill = False
-        ax.xaxis.pane.set_edgecolor('gray')
-        ax.yaxis.pane.set_edgecolor('gray')
-        ax.zaxis.pane.set_edgecolor('gray')
-        ax.grid(True, alpha=0.2)
-        
-        # ラベル色を白に
-        for label in ax.get_xticklabels() + ax.get_yticklabels() + ax.get_zticklabels():
-            label.set_color('white')
-        
-        # タイトルと凡例
-        ax.set_title('3D Camera Pose Visualization (Marker at Bottom)', color='white', fontsize=12)
-        ax.legend(loc='upper left', fontsize=8, facecolor=(0.3, 0.3, 0.3), edgecolor='white')
-        
-        # matplotlibの図をNumpy配列に変換
-        canvas = FigureCanvasAgg(fig)
-        canvas.draw()
-        renderer = canvas.get_renderer()
-        
-        # RGBA バッファを取得
-        buf = renderer.buffer_rgba()
-        size = canvas.get_width_height()
-        
-        # RGB画像に変換
-        image = np.frombuffer(buf, dtype=np.uint8)
-        image = image.reshape(size[1], size[0], 4)  # RGBAチャンネル
-        image_rgb = image[:, :, :3]  # RGB部分のみ取得
-        
-        # BGR形式に変換（OpenCV用）
-        image_bgr = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR)
-        
-        # 図を閉じてメモリ解放
-        plt.close(fig)
-        
-        return image_bgr
+
+    __all__ = ["WireframeRenderer"]
